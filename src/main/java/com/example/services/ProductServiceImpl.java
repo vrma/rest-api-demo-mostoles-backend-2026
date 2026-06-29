@@ -36,20 +36,17 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     public Product save(Product product) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'save'");
+        return productDao.save(product);
     }
 
     @Override
     public void delete(Product product) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'delete'");
+        productDao.delete(product);
     }
 
     @Override
     public List<Product> findAll() {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'findAll'");
+        return productDao.findAll();
     }
 
 }
