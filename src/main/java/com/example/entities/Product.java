@@ -56,6 +56,7 @@ public class Product implements Serializable {
     @Min(value = 0, message = "El precio no puede estar en valores negativos")
     private BigDecimal price;
 
+    @NotNull(message = "La presentación del producto es requerida")
     @ManyToOne(fetch = FetchType.LAZY)
     private Presentation presentation;
 }
