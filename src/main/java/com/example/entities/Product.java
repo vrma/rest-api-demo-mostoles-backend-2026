@@ -3,6 +3,8 @@ package com.example.entities;
 import java.io.Serializable;
 import java.math.BigDecimal;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -58,5 +60,6 @@ public class Product implements Serializable {
 
     @NotNull(message = "La presentación del producto es requerida")
     @ManyToOne(fetch = FetchType.LAZY)
+    @JsonIgnoreProperties({"hibernateLazyInitializer","handler"})
     private Presentation presentation;
 }
