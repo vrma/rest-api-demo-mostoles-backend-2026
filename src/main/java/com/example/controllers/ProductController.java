@@ -13,8 +13,12 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.Sort.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.BindingResult;
+import org.springframework.validation.ObjectError;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.example.entities.Product;
 import com.example.services.ProductService;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 
@@ -152,6 +157,56 @@ public class ProductController {
                  HttpStatus.INTERNAL_SERVER_ERROR);
         }    
            
+
+        return responseEntity;
+    }
+
+
+    /**
+     * Metodo que recibe por POST el Producto para ser persistido, guardado, y que valida el JSON 
+     * recibido, para comprobar si esta bien formado o no
+     */
+    @PostMapping
+    public ResponseEntity<Map<String, Object>> saveProduct(@Valid @RequestBody Product product,
+                  BindingResult result) {
+
+        List<String> mensajesDeError = new ArrayList<>();
+        Map<String, Object> responseAsMap = new HashMap<>();
+        ResponseEntity<Map<String, Object>> responseEntity = null;
+
+        // Primero, comprobar si hay errores en el producto recibido
+        if (result.hasErrors()) {
+             // Recuperamos los errores que tiene el producto recibido y se lo informamos al 
+             // que realizo la peticion (request) de persistir el producto
+            List<ObjectError> objectErrors = result.getAllErrors();
+
+            objectErrors.stream().forEach(objectError -> 
+                   mensajesDeError.add(objectError.getDefaultMessage()));
+
+            responseAsMap.put("El producto tiene los siguientes errores: ", 
+                        mensajesDeError);
+            responseAsMap.put("Producto mal formado: ", product);
+
+            responseEntity = new ResponseEntity<>(responseAsMap, 
+                   HttpStatus.BAD_REQUEST);
+
+            return responseEntity;
+        }
+
+
+        // Persistimos el producto porque si hemos llegado a este punto es que esta bien formado
+
+        try {
+            Product productoPersistido = productService.save(product);
+            responseAsMap.put("mensaje: ", "Producto persistido exitosamente!!!");
+            responseAsMap.put("producto Persistido: ", productoPersistido);
+            responseEntity = new ResponseEntity<Map<String,Object>>(responseAsMap, HttpStatus.CREATED);
+        } catch (DataAccessException e) {
+            responseAsMap.put("Error Grave", "No ha podido ser guardado el producto y la causa mas probable es: " + 
+                e.getMostSpecificCause().getMessage());
+            responseEntity = new ResponseEntity<Map<String,Object>>(responseAsMap, 
+                HttpStatus.INTERNAL_SERVER_ERROR);
+        }
 
         return responseEntity;
     }
