@@ -60,6 +60,8 @@ public class Product implements Serializable {
 
     @NotNull(message = "La presentación del producto es requerida")
     @ManyToOne(fetch = FetchType.LAZY)
-    @JsonIgnoreProperties({"hibernateLazyInitializer","handler"})
+    @JsonIgnoreProperties({ "hibernateLazyInitializer", "handler" })
     private Presentation presentation;
+
+    private String productImage;
 }

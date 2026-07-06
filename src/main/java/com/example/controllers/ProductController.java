@@ -1,5 +1,6 @@
 package com.example.controllers;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -20,11 +21,16 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.example.entities.Product;
+import com.example.models.FileUploadResponse;
 import com.example.services.ProductService;
+import com.example.utilities.FileUploadUtil;
 
+import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
@@ -57,6 +63,7 @@ import lombok.RequiredArgsConstructor;
 public class ProductController {
 
     private final ProductService productService;
+    private final FileUploadUtil fileUploadUtil;
 
     /**
      * 
@@ -164,10 +171,27 @@ public class ProductController {
      * Metodo que recibe por POST el Producto para ser persistido, guardado, y que
      * valida el JSON
      * recibido, para comprobar si esta bien formado o no
+     * 
+     * Primero: Hay que cambiar lo que recibe el metodo saveProduct, porque ya el
+     * producto
+     * no viene ocupando todo el cuerpo de la peticion (request), sino una parte, y
+     * la otra
+     * parte la ocupa la imagen del producto
+     * 
+     * Y, muy importante, que no se nos olvide anotar este metodo y todos los que
+     * insertan, crean,
+     * eliminan registros en las tablas con la anotacion @Transactional,
+     * y tambien hay que especificar el tipo de archivo que va a consumir este
+     * metodo
+     * 
+     * @throws IOException
+     * 
      */
-    @PostMapping
-    public ResponseEntity<Map<String, Object>> saveProduct(@Valid @RequestBody Product product,
-            BindingResult result) {
+    @PostMapping(consumes = "multipart/form-data")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> saveProduct(@Valid @RequestPart Product product,
+            BindingResult result,
+            @RequestPart(name = "file", required = false) MultipartFile imagenDelProducto) throws IOException {
 
         List<String> mensajesDeError = new ArrayList<>();
         Map<String, Object> responseAsMap = new HashMap<>();
@@ -193,6 +217,55 @@ public class ProductController {
 
         // Persistimos el producto porque si hemos llegado a este punto es que esta bien
         // formado
+        // Pero antes vamos a comprobar si hemos recibido imagen del producto, para
+        // guardarla
+        // en el sistema de archivo (file system)
+
+        if (imagenDelProducto != null && !imagenDelProducto.isEmpty()) {
+
+            /**
+             * Para guardar la imagen del producto, en primer lugar le agregaremos como
+             * prefijo un codigo
+             * alfanumerico (de letras y numeros), generado aleatoriamente a partir de un
+             * metodo que se
+             * encuentre en la biblioteca Apache Commonds Text, que hay que descargar la
+             * dependencia desde
+             * el repositorio central de maven y agregarla al pom.xml
+             */
+
+            /**
+             * Vamos a crear un Componente en un paquete que podria ser
+             * com.example.utilities, y este componente
+             * va a tener un metodo para guardar la imagen recibida en una carpeta del file
+             * system y devolver
+             * un codigo alfanumerico, generado aleatoriamente, que llevara como prefijo el
+             * nombre del fichero
+             * de imagen recibido.
+             * 
+             * Se hara uso intensivo de NIO.2 y se comprobara si la carpeta existe o no,
+             * para crearla
+             */
+
+            String fileCode = fileUploadUtil
+                    .saveFile(imagenDelProducto.getOriginalFilename(), imagenDelProducto);
+
+            product.setProductImage(fileCode + imagenDelProducto.getOriginalFilename());
+
+            /**
+             * Como es una API REST hay que devolver informacion al que ha realizado la
+             * request
+             * respecto a la imagen subida, para lo cual vamos a crear en un paquete llamado
+             * com.example.models un Record, donde devolveremos la informacion de la imagen
+             * subida
+             */
+
+            FileUploadResponse fileUploadResponse = new FileUploadResponse(
+                    fileCode + '-' + imagenDelProducto.getOriginalFilename(),
+                    "/products/fileDownLoad",
+                    imagenDelProducto.getSize());
+
+            responseAsMap.put("informacion de la imagen del producto", fileUploadResponse);
+        }
 
         try {
             Product productoPersistido = productService.save(product);
