@@ -6,19 +6,21 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.core.io.Resource;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.ObjectError;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -28,6 +30,7 @@ import org.springframework.web.multipart.MultipartFile;
 import com.example.entities.Product;
 import com.example.models.FileUploadResponse;
 import com.example.services.ProductService;
+import com.example.utilities.FileDownloadUtil;
 import com.example.utilities.FileUploadUtil;
 
 import jakarta.transaction.Transactional;
@@ -64,6 +67,7 @@ public class ProductController {
 
     private final ProductService productService;
     private final FileUploadUtil fileUploadUtil;
+    private final FileDownloadUtil fileDownloadUtil;
 
     /**
      * 
@@ -281,4 +285,42 @@ public class ProductController {
 
         return responseEntity;
     }
+
+    /**
+     * Metodo que recupera la imagen de un producto, dado el codigo que
+     * tiene como prefijo el nombre de la imagen
+     */
+    @GetMapping("/fileDownLoad/{fileCode}")
+    public ResponseEntity<?> downloadFile(@PathVariable String fileCode) {
+
+        Resource resource = null;
+
+        try {
+            resource = fileDownloadUtil.getFileAsResource(fileCode);
+        } catch (IOException ioe) {
+            return ResponseEntity
+                    .internalServerError()
+                    .build();
+        }
+
+        if (resource == null)
+            return new ResponseEntity<>("Imagen del producto no encontrada ",
+                    HttpStatus.NOT_FOUND);
+        /**
+         * Si estamos en este punto quiere decir que el fichero (imagen del producto) ha
+         * sido
+         * encontrado y podemos enviarlo como respuesta a la peticion, como un fichero
+         * adjunto
+         * en el cuerpo de la respuesta
+         */
+
+        String contentType = "application/octet-stream";
+        String headerValue = "attachment; fileName=\"" + resource.getFilename() + "\"";
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION, headerValue)
+                .body(resource);
+    }
+
 }
