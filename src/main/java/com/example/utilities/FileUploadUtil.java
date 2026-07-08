@@ -39,7 +39,7 @@ public class FileUploadUtil {
         fileCode = generator.generate(8);
 
         try (InputStream inputStream = multipartFile.getInputStream()) {
-            Path destino = uploadPath.resolve(fileCode + '-' + fileName);
+            Path destino = uploadPath.resolve(fileCode + fileName);
             Files.copy(inputStream, destino, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException ioe) {
             throw new IOException("Error guardando el archivo de imagen " + fileName, ioe);
