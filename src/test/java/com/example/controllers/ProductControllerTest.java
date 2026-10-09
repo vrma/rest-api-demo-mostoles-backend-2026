@@ -24,6 +24,10 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
@@ -204,8 +208,57 @@ class ProductControllerTest {
 						is(product1.getName())))
 				.andExpect(jsonPath("$._embedded.productList[0].presentation.id",
 						is(presentation1.getId())))
+				.andExpect(jsonPath("$._embedded.productList[0]._links.update.href",
+						containsString("/products/1")))
+				.andExpect(jsonPath("$._embedded.productList[0]._links.delete.href",
+						containsString("/products/1")))
 				.andExpect(jsonPath("$._links.self.href",
+						containsString("/products")))
+				.andExpect(jsonPath("$._links.create.href",
 						containsString("/products")));
+
+	}
+
+	@Test
+	@DisplayName("Controller Test que recupera los productos paginados con PagedModel")
+	void testFindAllPaginado() throws Exception {
+
+		// given
+		int page = 0;
+		int size = 2;
+		Pageable pageable = PageRequest.of(page, size, Sort.by("name"));
+		Page<Product> productPage = new PageImpl<>(products, pageable, 5);
+
+		given(productService.findAll(pageable)).willReturn(productPage);
+
+		// when / then
+		mockMvc.perform(get("/products")
+				.param("page", String.valueOf(page))
+				.param("size", String.valueOf(size))
+				.accept(MediaType.APPLICATION_JSON)
+				.header("Authorization", this.token))
+			.andDo(print())
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$._embedded.productList.size()",
+						is(products.size())))
+				.andExpect(jsonPath("$.page.size",
+						is(size)))
+				.andExpect(jsonPath("$.page.number",
+						is(page)))
+				.andExpect(jsonPath("$.page.totalElements",
+						is(5)))
+				.andExpect(jsonPath("$.page.totalPages",
+						is(3)))
+				.andExpect(jsonPath("$._links.self.href",
+						containsString("/products")))
+				.andExpect(jsonPath("$._links.create.href",
+						containsString("/products")))
+				.andExpect(jsonPath("$._links.first.href",
+						containsString("page=0")))
+				.andExpect(jsonPath("$._links.next.href",
+						containsString("page=1")))
+				.andExpect(jsonPath("$._links.last.href",
+						containsString("page=2")));
 
 	}
 

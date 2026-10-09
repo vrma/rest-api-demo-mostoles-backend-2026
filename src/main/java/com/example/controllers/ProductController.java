@@ -126,12 +126,11 @@ public class ProductController {
 
 			// Implica devolver los productos paginados, es decir, una pagina de Product
 			Page<Product> productPage = productService.findAll(pageable);
-			products = productPage.getContent();
 
-			// El ensamblador construye los enlaces de cada producto y los de paginacion
-			// (self, prev y next)
-			collectionModel = productModelAssembler.toCollectionModel(products, page, size,
-					productPage.getTotalPages());
+			// El ensamblador construye un PagedModel con los metadatos de paginacion y
+			// los enlaces de cada producto y de navegacion (self, create, first, prev y
+			// next)
+			collectionModel = productModelAssembler.toPagedModel(productPage);
 
 		} else {
 
