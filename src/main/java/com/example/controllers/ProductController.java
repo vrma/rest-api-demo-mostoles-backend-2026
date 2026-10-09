@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import org.springframework.core.io.Resource;
 import org.springframework.dao.DataAccessException;
@@ -16,6 +15,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.hateoas.CollectionModel;
 import org.springframework.hateoas.EntityModel;
 import org.springframework.hateoas.Link;
+import org.springframework.hateoas.RepresentationModel;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -35,6 +35,7 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.example.assemblers.ProductModelAssembler;
 import com.example.dto.ProductDto;
 import com.example.entities.Product;
 import com.example.mappers.ProductMapper;
@@ -79,6 +80,7 @@ public class ProductController {
 	private final FileDownloadUtil fileDownloadUtil;
 	private final FileUtil fileUtil;
 	private final ProductMapper productMapper;
+	private final ProductModelAssembler productModelAssembler;
 
 	/**
 	 * 
@@ -108,13 +110,13 @@ public class ProductController {
 	 */
 	@GetMapping
 	@PreAuthorize("hasRole('ADMIN') or hasRole('USER')")
-	public ResponseEntity<CollectionModel<EntityModel<ProductDto>>> dameProductos(
+	public ResponseEntity<CollectionModel<Product>> dameProductos(
 			@RequestParam(name = "page", required = false) Integer page,
 			@RequestParam(name = "size", required = false) Integer size) {
 
-		List<Product> products = null;
+		List<Product> products;
 		Sort sort = Sort.by("name");
-		Page<Product> productPage = null;
+		CollectionModel<Product> collectionModel;
 
 		// Comprobar si en la peticion (request) me han suministrado los parametros page
 		// y size
@@ -123,53 +125,22 @@ public class ProductController {
 			Pageable pageable = PageRequest.of(page, size, sort);
 
 			// Implica devolver los productos paginados, es decir, una pagina de Product
-			productPage = productService.findAll(pageable);
+			Page<Product> productPage = productService.findAll(pageable);
 			products = productPage.getContent();
+
+			// El ensamblador construye los enlaces de cada producto y los de paginacion
+			// (self, prev y next)
+			collectionModel = productModelAssembler.toCollectionModel(products, page, size,
+					productPage.getTotalPages());
 
 		} else {
 
 			// Devolver los productos ordenados, por nombre (name), por ejemplo
 			products = productService.findAll(sort);
-		}
 
-		/**
-		 * Capa de presentacion: mapear cada entidad Product con MapStruct al Record
-		 * ProductDto, y convertirlo en un EntityModel que envuelve al DTO con sus
-		 * enlaces hipermedia:
-		 * 
-		 * - self: apunta al propio recurso del producto (GET /products/{id})
-		 * 
-		 * - all-products: apunta a la coleccion completa de productos (GET /products)
-		 */
-		List<EntityModel<ProductDto>> productosConEnlaces = products.stream()
-				.map(producto -> {
-					ProductDto productDto = productMapper.toDto(producto);
-					return EntityModel.of(productDto,
-							linkTo(methodOn(ProductController.class).findProductById(producto.getId())).withSelfRel(),
-							linkTo(methodOn(ProductController.class).dameProductos(null, null))
-									.withRel("all-products"));
-				})
-				.collect(Collectors.toList());
-
-		// Enlace self de la coleccion completa
-		Link selfLink = linkTo(methodOn(ProductController.class).dameProductos(page, size)).withSelfRel();
-
-		CollectionModel<EntityModel<ProductDto>> collectionModel = CollectionModel.of(productosConEnlaces, selfLink);
-
-		// Enlaces de paginacion: prev y next, solamente si proceden
-		if (page != null && size != null && productPage.getTotalPages() > 1) {
-
-			if (page > 0) {
-				Link prevLink = linkTo(methodOn(ProductController.class).dameProductos(page - 1, size))
-						.withRel("prev");
-				collectionModel.add(prevLink);
-			}
-
-			if (page < productPage.getTotalPages() - 1) {
-				Link nextLink = linkTo(methodOn(ProductController.class).dameProductos(page + 1, size))
-						.withRel("next");
-				collectionModel.add(nextLink);
-			}
+			// El ensamblador construye los enlaces de cada producto y el self de la
+			// coleccion
+			collectionModel = productModelAssembler.toCollectionModel(products);
 		}
 
 		return new ResponseEntity<>(collectionModel, HttpStatus.OK);
@@ -186,11 +157,11 @@ public class ProductController {
 	 */
 	@GetMapping("/{id}")
 	@PreAuthorize("hasRole('ADMIN') or hasRole('USER')")
-	public ResponseEntity<EntityModel<?>> findProductById(
+	public ResponseEntity<RepresentationModel<?>> findProductById(
 			@PathVariable(name = "id", required = true) int product_id) {
 
 		Map<String, Object> responseAsMap = new HashMap<>();
-		ResponseEntity<EntityModel<?>> responseEntity = null;
+		ResponseEntity<RepresentationModel<?>> responseEntity = null;
 
 		try {
 			Product product = productService.findById(product_id);
@@ -199,21 +170,12 @@ public class ProductController {
 				responseAsMap.put("mensaje todo OK: ", successMessage);
 
 				/**
-				 * Capa de presentacion: mapear la entidad Product con MapStruct al Record
-				 * ProductDto, y envolverlo en un EntityModel junto con sus enlaces hipermedia:
-				 * 
-				 * - self: apunta al propio recurso del producto (GET /products/{id})
-				 * 
-				 * - all-products: apunta a la coleccion completa de productos (GET /products)
+				 * Capa de presentacion: el ensamblador (ProductModelAssembler) se encarga de
+				 * construir todos los enlaces HATEOAS del producto (self, all-products y, si
+				 * procede, product-image). El controlador ya no repite la construccion de
+				 * enlaces.
 				 */
-				Link selfLink = linkTo(methodOn(ProductController.class).findProductById(product_id)).withSelfRel();
-				Link allProductsLink = linkTo(methodOn(ProductController.class).dameProductos(null, null))
-						.withRel("all-products");
-
-				EntityModel<ProductDto> productEntityModel = EntityModel.of(productMapper.toDto(product), selfLink,
-						allProductsLink);
-
-				responseEntity = new ResponseEntity<>(productEntityModel, HttpStatus.OK);
+				responseEntity = new ResponseEntity<>(productModelAssembler.toModel(product), HttpStatus.OK);
 			} else {
 				String failureMessage = "No ha sido encontrado ningun producto con id: " + product_id;
 				responseAsMap.put("Error: ", failureMessage);
@@ -248,17 +210,13 @@ public class ProductController {
 	@PostMapping(consumes = "multipart/form-data")
 	@Transactional
 	@PreAuthorize("hasRole('ADMIN')")
-	public ResponseEntity<EntityModel<?>> saveProduct(@Valid @RequestPart(name = "product") ProductDto productDto,
+	public ResponseEntity<RepresentationModel<?>> saveProduct(@Valid @RequestPart(name = "product") ProductDto productDto,
 			BindingResult result,
 			@RequestPart(name = "file", required = false) MultipartFile imagenDelProducto) throws IOException {
 
 		List<String> mensajesDeError = new ArrayList<>();
 		Map<String, Object> responseAsMap = new HashMap<>();
-		ResponseEntity<EntityModel<?>> responseEntity = null;
-
-		// Codigo de la imagen del producto (si se ha recibido), para construir el
-		// enlace hipermedia de descarga de la imagen
-		String codigoDeLaImagen = null;
+		ResponseEntity<RepresentationModel<?>> responseEntity = null;
 
 		// Primero, comprobar si hay errores en el producto recibido
 		if (result.hasErrors()) {
@@ -312,43 +270,17 @@ public class ProductController {
 			String fileCode = fileUploadUtil.saveFile(imagenDelProducto.getOriginalFilename(), imagenDelProducto);
 
 			product.setProductImage(fileCode + '-' + imagenDelProducto.getOriginalFilename());
-
-			/**
-			 * Guardar el codigo de la imagen generado, porque con el se construira el
-			 * enlace hipermedia (GET /products/fileDownLoad/{fileCode}) que permitira
-			 * descargar la imagen del producto
-			 */
-			codigoDeLaImagen = fileCode;
 		}
 
 		try {
 			Product productoPersistido = productService.save(product);
 
 			/**
-			 * Capa de presentacion: mapear la entidad persistida con MapStruct al Record
-			 * ProductDto, y envolverlo en un EntityModel junto con sus enlaces hipermedia:
-			 * 
-			 * - self: apunta al propio recurso del producto (GET /products/{id})
-			 * 
-			 * - all-products: apunta a la coleccion completa de productos (GET /products)
-			 * 
-			 * - product-image: si el producto tiene imagen, apunta a su descarga
+			 * Capa de presentacion: el ensamblador construye todos los enlaces HATEOAS del
+			 * producto (self, all-products y, si tiene imagen, product-image)
 			 */
-			Link selfLink = linkTo(methodOn(ProductController.class).findProductById(productoPersistido.getId()))
-					.withSelfRel();
-			Link allProductsLink = linkTo(methodOn(ProductController.class).dameProductos(null, null))
-					.withRel("all-products");
-
-			EntityModel<ProductDto> productEntityModel = EntityModel.of(productMapper.toDto(productoPersistido),
-					selfLink, allProductsLink);
-
-			if (codigoDeLaImagen != null) {
-				Link imageLink = linkTo(methodOn(ProductController.class).downloadFile(codigoDeLaImagen))
-						.withRel("product-image");
-				productEntityModel.add(imageLink);
-			}
-
-			responseEntity = new ResponseEntity<>(productEntityModel, HttpStatus.CREATED);
+			responseEntity = new ResponseEntity<>(productModelAssembler.toModel(productoPersistido),
+					HttpStatus.CREATED);
 		} catch (DataAccessException e) {
 			responseAsMap.put("Error Grave", "No ha podido ser guardado el producto y la causa mas probable es: "
 					+ e.getMostSpecificCause().getMessage());
@@ -474,18 +406,14 @@ public class ProductController {
 	@PutMapping(value = "/{id}", consumes = "multipart/form-data")
 	@Transactional
 	@PreAuthorize("hasRole('ADMIN')")
-	public ResponseEntity<EntityModel<?>> updateProduct(@Valid @RequestPart(name = "product") ProductDto productDto,
+	public ResponseEntity<RepresentationModel<?>> updateProduct(@Valid @RequestPart(name = "product") ProductDto productDto,
 			BindingResult result,
 			@RequestPart(name = "file", required = false) MultipartFile imagenDelProducto,
 			@PathVariable(name = "id", required = true) int product_id) throws IOException {
 
 		List<String> mensajesDeError = new ArrayList<>();
 		Map<String, Object> responseAsMap = new HashMap<>();
-		ResponseEntity<EntityModel<?>> responseEntity = null;
-
-		// Codigo de la imagen del producto (si se ha recibido), para construir el
-		// enlace hipermedia de descarga de la imagen
-		String codigoDeLaImagen = null;
+		ResponseEntity<RepresentationModel<?>> responseEntity = null;
 
 		// comprobar errores de validación
 		if (result.hasErrors()) {
@@ -543,13 +471,6 @@ public class ProductController {
 					imagenDelProducto);
 
 			product.setProductImage(fileCode + '-' + imagenDelProducto.getOriginalFilename());
-
-			/**
-			 * Guardar el codigo de la imagen generado, porque con el se construira el
-			 * enlace hipermedia (GET /products/fileDownLoad/{fileCode}) que permitira
-			 * descargar la imagen del producto
-			 */
-			codigoDeLaImagen = fileCode;
 		}
 
 		try {
@@ -557,30 +478,10 @@ public class ProductController {
 			Product productoAGuardar = productService.save(product);
 
 			/**
-			 * Capa de presentacion: mapear la entidad actualizada con MapStruct al Record
-			 * ProductDto, y envolverlo en un EntityModel junto con sus enlaces hipermedia:
-			 * 
-			 * - self: apunta al propio recurso del producto (GET /products/{id})
-			 * 
-			 * - all-products: apunta a la coleccion completa de productos (GET /products)
-			 * 
-			 * - product-image: si el producto tiene imagen, apunta a su descarga
+			 * Capa de presentacion: el ensamblador construye todos los enlaces HATEOAS del
+			 * producto (self, all-products y, si tiene imagen, product-image)
 			 */
-			Link selfLink = linkTo(methodOn(ProductController.class).findProductById(productoAGuardar.getId()))
-					.withSelfRel();
-			Link allProductsLink = linkTo(methodOn(ProductController.class).dameProductos(null, null))
-					.withRel("all-products");
-
-			EntityModel<ProductDto> productEntityModel = EntityModel.of(productMapper.toDto(productoAGuardar),
-					selfLink, allProductsLink);
-
-			if (codigoDeLaImagen != null) {
-				Link imageLink = linkTo(methodOn(ProductController.class).downloadFile(codigoDeLaImagen))
-						.withRel("product-image");
-				productEntityModel.add(imageLink);
-			}
-
-			responseEntity = new ResponseEntity<>(productEntityModel, HttpStatus.OK);
+			responseEntity = new ResponseEntity<>(productModelAssembler.toModel(productoAGuardar), HttpStatus.OK);
 
 		} catch (DataAccessException e) {
 

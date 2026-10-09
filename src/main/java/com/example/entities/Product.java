@@ -5,6 +5,8 @@ import java.math.BigDecimal;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+import org.springframework.hateoas.RepresentationModel;
+
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -34,7 +36,7 @@ import lombok.ToString;
 @ToString
 @EqualsAndHashCode
 @Builder
-public class Product implements Serializable {
+public class Product extends RepresentationModel<Product> implements Serializable {
 
     private static final long serialVersionUID = 1L;
 

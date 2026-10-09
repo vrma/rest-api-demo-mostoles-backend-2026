@@ -198,11 +198,11 @@ class ProductControllerTest {
 		// then
 
 		response.andExpect(status().isOk()).andDo(print())
-				.andExpect(jsonPath("$._embedded.productDtoList.size()",
+				.andExpect(jsonPath("$._embedded.productList.size()",
 						is(products.size())))
-				.andExpect(jsonPath("$._embedded.productDtoList[0].name",
+				.andExpect(jsonPath("$._embedded.productList[0].name",
 						is(product1.getName())))
-				.andExpect(jsonPath("$._embedded.productDtoList[0].presentationId",
+				.andExpect(jsonPath("$._embedded.productList[0].presentation.id",
 						is(presentation1.getId())))
 				.andExpect(jsonPath("$._links.self.href",
 						containsString("/products")));
@@ -245,7 +245,7 @@ class ProductControllerTest {
 				    	.andExpect(status().isCreated())
 				    	.andExpect(jsonPath("$.name",
 		  			is(product1.getName())))
-				    	.andExpect(jsonPath("$.presentationId",
+				    	.andExpect(jsonPath("$.presentation.id",
 		  			is(presentation1.getId())))
 				    	.andExpect(jsonPath("$._links.self.href",
 		  			containsString("/products/1")));
@@ -279,7 +279,7 @@ class ProductControllerTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.name",
 						is(product1.getName())))
-				.andExpect(jsonPath("$.presentationId",
+				.andExpect(jsonPath("$.presentation.id",
 						is(presentation1.getId())))
 				.andExpect(jsonPath("$._links.self.href",
 						containsString("/products/1")))
@@ -337,7 +337,7 @@ class ProductControllerTest {
             		is(product1.getName())))
             .andExpect(jsonPath("$.description",
             		is(product1.getDescription())))
-            .andExpect(jsonPath("$.presentationId",
+            .andExpect(jsonPath("$.presentation.id",
             		is(presentation1.getId())))
             .andExpect(jsonPath("$._links.self.href",
             		containsString("/products/1")));
