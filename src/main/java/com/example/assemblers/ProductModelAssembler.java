@@ -12,6 +12,8 @@ import org.springframework.hateoas.Link;
 import org.springframework.hateoas.PagedModel;
 import org.springframework.hateoas.PagedModel.PageMetadata;
 import org.springframework.hateoas.server.mvc.RepresentationModelAssemblerSupport;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
 import com.example.controllers.ProductController;
@@ -30,19 +32,20 @@ import com.example.entities.Product;
  * 
  * Enlaces generados:
  * 
- * - Sobre cada producto (toModel): self, all-products, update (PUT), delete
- *   (DELETE) y product-image (si el producto tiene imagen).
+ * - Sobre cada producto (toModel): self y all-products siempre; update (PUT) y
+ *   delete (DELETE) solamente si el usuario autenticado tiene el rol ADMIN; y
+ *   product-image si el producto tiene imagen.
  * 
- * - Sobre la coleccion (toCollectionModel): self y create (POST).
+ * - Sobre la coleccion (toCollectionModel): self siempre y create (POST)
+ *   solamente si el usuario autenticado es ADMIN.
  * 
  * - Sobre la coleccion paginada (toPagedModel): los mismos enlaces que la
  *   coleccion mas first, prev y next, y los metadatos de paginacion (PagedModel +
  *   PageMetadata).
  * 
- * Nota: los enlaces de mutacion (create/update/delete) se anuncian siempre,
- * aunque los endpoints asociados esten protegidos con @PreAuthorize. En una API
- * madura convendria anunciarlos condicionalmente segun los roles del usuario
- * autenticado.
+ * Los enlaces de mutacion se anuncian condicionalmente segun los roles del
+ * usuario autenticado (SecurityContext), de modo que la hipermedia refleja las
+ * operaciones que realmente puede realizar el cliente.
  */
 @Component
 public class ProductModelAssembler extends RepresentationModelAssemblerSupport<Product, Product> {
@@ -52,6 +55,7 @@ public class ProductModelAssembler extends RepresentationModelAssemblerSupport<P
 	private static final String CREATE = "create";
 	private static final String UPDATE = "update";
 	private static final String DELETE = "delete";
+	private static final String ROLE_ADMIN = "ROLE_ADMIN";
 
 	public ProductModelAssembler() {
 		super(ProductController.class, Product.class);
@@ -59,17 +63,20 @@ public class ProductModelAssembler extends RepresentationModelAssemblerSupport<P
 
 	/**
 	 * Convierte una entidad Product en un RepresentationModel anadiendole sus
-	 * enlaces hipermedia (self, all-products y los de mutacion update/delete, ademas
-	 * de product-image si tiene imagen).
+	 * enlaces hipermedia: self y all-products siempre; update y delete solo si el
+	 * usuario autenticado es ADMIN; y product-image si tiene imagen.
 	 */
 	@Override
 	public Product toModel(Product product) {
 
 		product.add(
 				linkTo(methodOn(ProductController.class).findProductById(product.getId())).withSelfRel(),
-				linkTo(methodOn(ProductController.class).dameProductos(null, null)).withRel(ALL_PRODUCTS),
-				updateLink(product),
-				deleteLink(product));
+				linkTo(methodOn(ProductController.class).dameProductos(null, null)).withRel(ALL_PRODUCTS));
+
+		// Los enlaces de mutacion solo se anuncian a los administradores
+		if (esAdmin()) {
+			product.add(updateLink(product), deleteLink(product));
+		}
 
 		if (product.getProductImage() != null) {
 			product.add(linkTo(methodOn(ProductController.class).downloadFile(product.getProductImage()))
@@ -89,9 +96,12 @@ public class ProductModelAssembler extends RepresentationModelAssemblerSupport<P
 
 		CollectionModel<Product> collectionModel = super.toCollectionModel(entities);
 
-		collectionModel.add(
-				linkTo(methodOn(ProductController.class).dameProductos(null, null)).withSelfRel(),
-				createLink());
+		collectionModel.add(linkTo(methodOn(ProductController.class).dameProductos(null, null)).withSelfRel());
+
+		// El enlace create (POST) solo se anuncia a los administradores
+		if (esAdmin()) {
+			collectionModel.add(createLink());
+		}
 
 		return collectionModel;
 	}
@@ -110,8 +120,12 @@ public class ProductModelAssembler extends RepresentationModelAssemblerSupport<P
 				content,
 				new PageMetadata(page.getSize(), page.getNumber(), page.getTotalElements()),
 				linkTo(methodOn(ProductController.class).dameProductos(page.getNumber(), page.getSize()))
-						.withSelfRel(),
-				createLink());
+						.withSelfRel());
+
+		// El enlace create (POST) solo se anuncia a los administradores
+		if (esAdmin()) {
+			pagedModel.add(createLink());
+		}
 
 		if (page.getTotalPages() > 0) {
 
@@ -136,6 +150,23 @@ public class ProductModelAssembler extends RepresentationModelAssemblerSupport<P
 		}
 
 		return pagedModel;
+	}
+
+	/**
+	 * Comprueba si el usuario autenticado en el contexto de seguridad tiene el rol
+	 * ADMIN. Se utiliza para anunciar los enlaces de mutacion (create/update/delete)
+	 * solamente cuando el cliente puede realmente ejecutar esas operaciones.
+	 */
+	private boolean esAdmin() {
+
+		Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+		if (authentication == null || !authentication.isAuthenticated()) {
+			return false;
+		}
+
+		return authentication.getAuthorities().stream()
+				.anyMatch(authority -> ROLE_ADMIN.equals(authority.getAuthority()));
 	}
 
 	/**

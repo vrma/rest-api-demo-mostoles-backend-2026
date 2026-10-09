@@ -98,40 +98,21 @@ class ProductControllerTest {
 	ProductDto productDto1, productDto2;
 	
 	String token;
+	String userToken;
 	
 	@BeforeEach
 	void setUp() throws Exception {
 		
 		/**
-		 * Necesitamos obtener un token valido para presentarlo en cada test
+		 * Necesitamos obtener un token valido para presentarlo en cada test. Se
+		 * obtienen dos: uno de un usuario ADMIN (admin1) y otro de un usuario con rol
+		 * USER (user1), para poder comprobar los enlaces HATEOAS que se anuncian a cada
+		 * uno.
 		 */
 		
-		LogginRequest logginRequest = LogginRequest.builder()
-				.username("admin1")
-				.password("Temp2026$$##")
-				.build();
+		this.token = obtenerToken("admin1", "Temp2026$$##");
 		
-		/**
-		 * El objeto anterior, logginRequest, tiene que ser convertido a formato JSON
-		 * para lo cual se puede utilizar el componente ObjectMapper que convierte a un 
-		 * String en formato JSON
-		 */
-		
-		String jsonLogginRequest = objectMapper.writeValueAsString(logginRequest);
-		
-		ResultActions resultActions = this.mockMvc.perform(post("/api/auth/signin")
-				.contentType(MediaType.APPLICATION_JSON)
-				.content(jsonLogginRequest));
-		
-		// Extraer el token de la respuesta a la request (peticion) anterior
-		
-		MvcResult mvcResult = resultActions.andDo(print()).andReturn();
-		
-		String contentAsString = mvcResult.getResponse().getContentAsString();
-		
-		JSONObject jsonObject = new JSONObject(contentAsString);
-		
-		this.token = "Bearer " + jsonObject.getString("token");          
+		this.userToken = obtenerToken("user1", "Temp2026$$##");
 		
 		// ------------------------------------------------------------------------
 		
@@ -181,6 +162,32 @@ class ProductControllerTest {
 
 		productDto2 = new ProductDto(product2.getName(), product2.getDescription(), product2.getStock(),
 				product2.getPrice(), presentation2.getId(), product2.getProductImage());
+	}
+
+	/**
+	 * Realiza el login contra /api/auth/signin y devuelve el token JWT listo para
+	 * usarse en la cabecera Authorization.
+	 */
+	private String obtenerToken(String username, String password) throws Exception {
+
+		LogginRequest logginRequest = LogginRequest.builder()
+				.username(username)
+				.password(password)
+				.build();
+
+		String jsonLogginRequest = objectMapper.writeValueAsString(logginRequest);
+
+		ResultActions resultActions = this.mockMvc.perform(post("/api/auth/signin")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(jsonLogginRequest));
+
+		MvcResult mvcResult = resultActions.andReturn();
+
+		String contentAsString = mvcResult.getResponse().getContentAsString();
+
+		JSONObject jsonObject = new JSONObject(contentAsString);
+
+		return "Bearer " + jsonObject.getString("token");
 	}
 
 	@Test
@@ -260,6 +267,47 @@ class ProductControllerTest {
 				.andExpect(jsonPath("$._links.last.href",
 						containsString("page=2")));
 
+	}
+
+	@Test
+	@DisplayName("Controller Test que NO anuncia enlaces de mutacion de un producto a un usuario USER")
+	void testProductoSinEnlacesDeMutacionParaUsuarioNoAdmin() throws Exception {
+
+		// given
+		given(productService.findById(1)).willReturn(product1);
+
+		// when / then: un usuario con rol USER no debe ver los enlaces update ni delete
+		mockMvc.perform(get("/products/{id}", 1)
+				.accept(MediaType.APPLICATION_JSON)
+				.header("Authorization", this.userToken))
+			.andDo(print())
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.name", is(product1.getName())))
+			.andExpect(jsonPath("$._links.self.href", containsString("/products/1")))
+			.andExpect(jsonPath("$._links['all-products'].href", containsString("/products")))
+			.andExpect(jsonPath("$._links.update").doesNotExist())
+			.andExpect(jsonPath("$._links.delete").doesNotExist());
+	}
+
+	@Test
+	@DisplayName("Controller Test que NO anuncia el enlace create de la coleccion a un usuario USER")
+	void testColeccionSinEnlaceCreateParaUsuarioNoAdmin() throws Exception {
+
+		// given
+		given(productService.findAll(Sort.by("name"))).willReturn(products);
+
+		// when / then: un usuario con rol USER no debe ver el enlace create ni los de
+		// mutacion de cada producto
+		mockMvc.perform(get("/products")
+				.accept(MediaType.APPLICATION_JSON)
+				.header("Authorization", this.userToken))
+			.andDo(print())
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$._embedded.productList[0]._links.self.href",
+					containsString("/products/1")))
+			.andExpect(jsonPath("$._embedded.productList[0]._links.update").doesNotExist())
+			.andExpect(jsonPath("$._embedded.productList[0]._links.delete").doesNotExist())
+			.andExpect(jsonPath("$._links.create").doesNotExist());
 	}
 
 	@Test
