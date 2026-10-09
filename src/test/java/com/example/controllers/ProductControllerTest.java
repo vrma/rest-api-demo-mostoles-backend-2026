@@ -32,6 +32,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
+import com.example.dto.ProductDto;
 import com.example.entities.Presentation;
 import com.example.entities.Product;
 import com.example.services.ProductService;
@@ -90,6 +91,7 @@ class ProductControllerTest {
 	List<Product> products = new ArrayList<>();
 	Presentation presentation1, presentation2;
 	Product product1, product2;
+	ProductDto productDto1, productDto2;
 	
 	String token;
 	
@@ -133,11 +135,13 @@ class ProductControllerTest {
 				.name("decenas")
 				.description("Por decenas")
 				.build();
+		presentation1.setId(1);
 		
 		presentation2 = Presentation.builder()
 				.name("unidades")
 				.description("Por unidades")
 				.build();
+		presentation2.setId(2);
 			
 		product1 = Product.builder()
 				.name("Camara")
@@ -162,6 +166,17 @@ class ProductControllerTest {
 		
 		products.add(product1);
 		products.add(product2);
+
+		/**
+		 * Los ProductDto (capa de presentacion, el Record ProductDto) son los que
+		 * viajan en el cuerpo de las peticiones POST/PUT (parte multipart "product"),
+		 * y referencian la presentacion por su id (presentationId)
+		 */
+		productDto1 = new ProductDto(product1.getName(), product1.getDescription(), product1.getStock(),
+				product1.getPrice(), presentation1.getId(), product1.getProductImage());
+
+		productDto2 = new ProductDto(product2.getName(), product2.getDescription(), product2.getStock(),
+				product2.getPrice(), presentation2.getId(), product2.getProductImage());
 	}
 
 	@Test
@@ -183,10 +198,12 @@ class ProductControllerTest {
 		// then
 
 		response.andExpect(status().isOk()).andDo(print())
-				.andExpect(jsonPath("$._embedded.productList.size()",
+				.andExpect(jsonPath("$._embedded.productDtoList.size()",
 						is(products.size())))
-				.andExpect(jsonPath("$._embedded.productList[0].name",
+				.andExpect(jsonPath("$._embedded.productDtoList[0].name",
 						is(product1.getName())))
+				.andExpect(jsonPath("$._embedded.productDtoList[0].presentationId",
+						is(presentation1.getId())))
 				.andExpect(jsonPath("$._links.self.href",
 						containsString("/products")));
 
@@ -198,15 +215,19 @@ class ProductControllerTest {
 		
 		// given
 		given(productService.save(any(Product.class)))
-			.willAnswer(invocation -> invocation.getArgument(0));
+			.willAnswer(invocation -> {
+				Product productoAGuardar = invocation.getArgument(0);
+				productoAGuardar.setId(1);
+				return productoAGuardar;
+			});
 		
 		// when
 		
-		/* Convertir el producto a formato JSON, es decir, una cadena (String)
+		/* Convertir el ProductDto a formato JSON, es decir, una cadena (String)
 		 * en formato de JSON, lo cual hace el objectMapper que hemos inyectado como 
 		 * dependencia al principio de la clase bajo Test */
 		
-		String jsonStringProduct = objectMapper.writeValueAsString(product1);
+		String jsonStringProduct = objectMapper.writeValueAsString(productDto1);
 		
 		MockMultipartFile bytesArrayProduct = new MockMultipartFile(
 				    "product", 
@@ -224,6 +245,8 @@ class ProductControllerTest {
 				    	.andExpect(status().isCreated())
 				    	.andExpect(jsonPath("$.name",
 		  			is(product1.getName())))
+				    	.andExpect(jsonPath("$.presentationId",
+		  			is(presentation1.getId())))
 				    	.andExpect(jsonPath("$._links.self.href",
 		  			containsString("/products/1")));
 		  	
@@ -256,6 +279,8 @@ class ProductControllerTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.name",
 						is(product1.getName())))
+				.andExpect(jsonPath("$.presentationId",
+						is(presentation1.getId())))
 				.andExpect(jsonPath("$._links.self.href",
 						containsString("/products/1")))
 				.andExpect(jsonPath("$._links['all-products'].href",
@@ -288,7 +313,7 @@ class ProductControllerTest {
                 .willAnswer(invocation -> invocation.getArgument(0));
 
         //when
-        String jsonStringProduct = objectMapper.writeValueAsString(product1);
+        String jsonStringProduct = objectMapper.writeValueAsString(productDto1);
 
         MockMultipartFile bytesArrayProduct = new MockMultipartFile("product", 
                             null,
@@ -312,6 +337,8 @@ class ProductControllerTest {
             		is(product1.getName())))
             .andExpect(jsonPath("$.description",
             		is(product1.getDescription())))
+            .andExpect(jsonPath("$.presentationId",
+            		is(presentation1.getId())))
             .andExpect(jsonPath("$._links.self.href",
             		containsString("/products/1")));
         

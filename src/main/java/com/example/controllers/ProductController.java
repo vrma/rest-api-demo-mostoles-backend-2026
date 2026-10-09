@@ -35,7 +35,9 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.example.dto.ProductDto;
 import com.example.entities.Product;
+import com.example.mappers.ProductMapper;
 import com.example.services.ProductService;
 import com.example.utilities.FileDownloadUtil;
 import com.example.utilities.FileUploadUtil;
@@ -76,6 +78,7 @@ public class ProductController {
 	private final FileUploadUtil fileUploadUtil;
 	private final FileDownloadUtil fileDownloadUtil;
 	private final FileUtil fileUtil;
+	private final ProductMapper productMapper;
 
 	/**
 	 * 
@@ -105,7 +108,7 @@ public class ProductController {
 	 */
 	@GetMapping
 	@PreAuthorize("hasRole('ADMIN') or hasRole('USER')")
-	public ResponseEntity<CollectionModel<EntityModel<Product>>> dameProductos(
+	public ResponseEntity<CollectionModel<EntityModel<ProductDto>>> dameProductos(
 			@RequestParam(name = "page", required = false) Integer page,
 			@RequestParam(name = "size", required = false) Integer size) {
 
@@ -130,24 +133,28 @@ public class ProductController {
 		}
 
 		/**
-		 * HATEOAS: convertir cada Product en un EntityModel que envuelve al producto
-		 * con sus enlaces hipermedia:
+		 * Capa de presentacion: mapear cada entidad Product con MapStruct al Record
+		 * ProductDto, y convertirlo en un EntityModel que envuelve al DTO con sus
+		 * enlaces hipermedia:
 		 * 
 		 * - self: apunta al propio recurso del producto (GET /products/{id})
 		 * 
 		 * - all-products: apunta a la coleccion completa de productos (GET /products)
 		 */
-		List<EntityModel<Product>> productosConEnlaces = products.stream()
-				.map(producto -> EntityModel.of(producto,
-						linkTo(methodOn(ProductController.class).findProductById(producto.getId())).withSelfRel(),
-						linkTo(methodOn(ProductController.class).dameProductos(null, null))
-								.withRel("all-products")))
+		List<EntityModel<ProductDto>> productosConEnlaces = products.stream()
+				.map(producto -> {
+					ProductDto productDto = productMapper.toDto(producto);
+					return EntityModel.of(productDto,
+							linkTo(methodOn(ProductController.class).findProductById(producto.getId())).withSelfRel(),
+							linkTo(methodOn(ProductController.class).dameProductos(null, null))
+									.withRel("all-products"));
+				})
 				.collect(Collectors.toList());
 
 		// Enlace self de la coleccion completa
 		Link selfLink = linkTo(methodOn(ProductController.class).dameProductos(page, size)).withSelfRel();
 
-		CollectionModel<EntityModel<Product>> collectionModel = CollectionModel.of(productosConEnlaces, selfLink);
+		CollectionModel<EntityModel<ProductDto>> collectionModel = CollectionModel.of(productosConEnlaces, selfLink);
 
 		// Enlaces de paginacion: prev y next, solamente si proceden
 		if (page != null && size != null && productPage.getTotalPages() > 1) {
@@ -192,8 +199,8 @@ public class ProductController {
 				responseAsMap.put("mensaje todo OK: ", successMessage);
 
 				/**
-				 * HATEOAS: envolver el producto encontrado en un EntityModel junto con sus
-				 * enlaces hipermedia:
+				 * Capa de presentacion: mapear la entidad Product con MapStruct al Record
+				 * ProductDto, y envolverlo en un EntityModel junto con sus enlaces hipermedia:
 				 * 
 				 * - self: apunta al propio recurso del producto (GET /products/{id})
 				 * 
@@ -203,7 +210,8 @@ public class ProductController {
 				Link allProductsLink = linkTo(methodOn(ProductController.class).dameProductos(null, null))
 						.withRel("all-products");
 
-				EntityModel<Product> productEntityModel = EntityModel.of(product, selfLink, allProductsLink);
+				EntityModel<ProductDto> productEntityModel = EntityModel.of(productMapper.toDto(product), selfLink,
+						allProductsLink);
 
 				responseEntity = new ResponseEntity<>(productEntityModel, HttpStatus.OK);
 			} else {
@@ -240,7 +248,8 @@ public class ProductController {
 	@PostMapping(consumes = "multipart/form-data")
 	@Transactional
 	@PreAuthorize("hasRole('ADMIN')")
-	public ResponseEntity<EntityModel<?>> saveProduct(@Valid @RequestPart Product product, BindingResult result,
+	public ResponseEntity<EntityModel<?>> saveProduct(@Valid @RequestPart(name = "product") ProductDto productDto,
+			BindingResult result,
 			@RequestPart(name = "file", required = false) MultipartFile imagenDelProducto) throws IOException {
 
 		List<String> mensajesDeError = new ArrayList<>();
@@ -260,12 +269,18 @@ public class ProductController {
 			objectErrors.stream().forEach(objectError -> mensajesDeError.add(objectError.getDefaultMessage()));
 
 			responseAsMap.put("El producto tiene los siguientes errores: ", mensajesDeError);
-			responseAsMap.put("Producto mal formado: ", product);
+			responseAsMap.put("Producto mal formado: ", productDto);
 
 			responseEntity = new ResponseEntity<>(EntityModel.of(responseAsMap), HttpStatus.BAD_REQUEST);
 
 			return responseEntity;
 		}
+
+		/**
+		 * Capa de persistencia: convertir el ProductDto recibido (capa de presentacion)
+		 * en la entidad Product que entiende JPA/Hibernate, mediante MapStruct
+		 */
+		Product product = productMapper.toEntity(productDto);
 
 		// Persistimos el producto porque si hemos llegado a este punto es que esta bien
 		// formado
@@ -310,8 +325,8 @@ public class ProductController {
 			Product productoPersistido = productService.save(product);
 
 			/**
-			 * HATEOAS: envolver el producto persistido en un EntityModel junto con sus
-			 * enlaces hipermedia:
+			 * Capa de presentacion: mapear la entidad persistida con MapStruct al Record
+			 * ProductDto, y envolverlo en un EntityModel junto con sus enlaces hipermedia:
 			 * 
 			 * - self: apunta al propio recurso del producto (GET /products/{id})
 			 * 
@@ -324,7 +339,8 @@ public class ProductController {
 			Link allProductsLink = linkTo(methodOn(ProductController.class).dameProductos(null, null))
 					.withRel("all-products");
 
-			EntityModel<Product> productEntityModel = EntityModel.of(productoPersistido, selfLink, allProductsLink);
+			EntityModel<ProductDto> productEntityModel = EntityModel.of(productMapper.toDto(productoPersistido),
+					selfLink, allProductsLink);
 
 			if (codigoDeLaImagen != null) {
 				Link imageLink = linkTo(methodOn(ProductController.class).downloadFile(codigoDeLaImagen))
@@ -458,7 +474,8 @@ public class ProductController {
 	@PutMapping(value = "/{id}", consumes = "multipart/form-data")
 	@Transactional
 	@PreAuthorize("hasRole('ADMIN')")
-	public ResponseEntity<EntityModel<?>> updateProduct(@Valid @RequestPart Product product, BindingResult result,
+	public ResponseEntity<EntityModel<?>> updateProduct(@Valid @RequestPart(name = "product") ProductDto productDto,
+			BindingResult result,
 			@RequestPart(name = "file", required = false) MultipartFile imagenDelProducto,
 			@PathVariable(name = "id", required = true) int product_id) throws IOException {
 
@@ -480,7 +497,7 @@ public class ProductController {
 			});
 
 			responseAsMap.put("respuesta de error: ", mensajesDeError);
-			responseAsMap.put("producto mal formado: ", product);
+			responseAsMap.put("producto mal formado: ", productDto);
 			responseEntity = new ResponseEntity<>(EntityModel.of(responseAsMap), HttpStatus.BAD_REQUEST);
 
 			return responseEntity;
@@ -496,6 +513,12 @@ public class ProductController {
 			responseAsMap.put("mensaje de error: ", "producto con id: " + product_id + " no encontrado.");
 			return new ResponseEntity<>(EntityModel.of(responseAsMap), HttpStatus.NOT_FOUND);
 		}
+
+		/**
+		 * Capa de persistencia: convertir el ProductDto recibido (capa de presentacion)
+		 * en la entidad Product que entiende JPA/Hibernate, mediante MapStruct
+		 */
+		Product product = productMapper.toEntity(productDto);
 
 		if (imagenDelProducto != null && !imagenDelProducto.isEmpty()) {
 
@@ -534,8 +557,8 @@ public class ProductController {
 			Product productoAGuardar = productService.save(product);
 
 			/**
-			 * HATEOAS: envolver el producto actualizado en un EntityModel junto con sus
-			 * enlaces hipermedia:
+			 * Capa de presentacion: mapear la entidad actualizada con MapStruct al Record
+			 * ProductDto, y envolverlo en un EntityModel junto con sus enlaces hipermedia:
 			 * 
 			 * - self: apunta al propio recurso del producto (GET /products/{id})
 			 * 
@@ -548,7 +571,8 @@ public class ProductController {
 			Link allProductsLink = linkTo(methodOn(ProductController.class).dameProductos(null, null))
 					.withRel("all-products");
 
-			EntityModel<Product> productEntityModel = EntityModel.of(productoAGuardar, selfLink, allProductsLink);
+			EntityModel<ProductDto> productEntityModel = EntityModel.of(productMapper.toDto(productoAGuardar),
+					selfLink, allProductsLink);
 
 			if (codigoDeLaImagen != null) {
 				Link imageLink = linkTo(methodOn(ProductController.class).downloadFile(codigoDeLaImagen))
