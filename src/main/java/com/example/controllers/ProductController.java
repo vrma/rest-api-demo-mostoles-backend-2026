@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.core.io.Resource;
 import org.springframework.dao.DataAccessException;
@@ -12,6 +13,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.hateoas.CollectionModel;
+import org.springframework.hateoas.EntityModel;
+import org.springframework.hateoas.Link;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -32,11 +36,13 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.example.entities.Product;
-import com.example.models.FileUploadResponse;
 import com.example.services.ProductService;
 import com.example.utilities.FileDownloadUtil;
 import com.example.utilities.FileUploadUtil;
 import com.example.utilities.FileUtil;
+
+import static org.springframework.hateoas.server.mvc.WebMvcLinkBuilder.linkTo;
+import static org.springframework.hateoas.server.mvc.WebMvcLinkBuilder.methodOn;
 
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
@@ -99,13 +105,13 @@ public class ProductController {
 	 */
 	@GetMapping
 	@PreAuthorize("hasRole('ADMIN') or hasRole('USER')")
-	public ResponseEntity<Map<String, Object>> dameProductos(
+	public ResponseEntity<CollectionModel<EntityModel<Product>>> dameProductos(
 			@RequestParam(name = "page", required = false) Integer page,
 			@RequestParam(name = "size", required = false) Integer size) {
 
 		List<Product> products = null;
-		Map<String, Object> responseAsMap = new HashMap<>();
 		Sort sort = Sort.by("name");
+		Page<Product> productPage = null;
 
 		// Comprobar si en la peticion (request) me han suministrado los parametros page
 		// y size
@@ -114,18 +120,52 @@ public class ProductController {
 			Pageable pageable = PageRequest.of(page, size, sort);
 
 			// Implica devolver los productos paginados, es decir, una pagina de Product
-			Page<Product> productPage = productService.findAll(pageable);
+			productPage = productService.findAll(pageable);
 			products = productPage.getContent();
-			responseAsMap.put("products", products);
 
 		} else {
 
 			// Devolver los productos ordenados, por nombre (name), por ejemplo
 			products = productService.findAll(sort);
-			responseAsMap.put("products", products);
 		}
 
-		return new ResponseEntity<>(responseAsMap, HttpStatus.OK);
+		/**
+		 * HATEOAS: convertir cada Product en un EntityModel que envuelve al producto
+		 * con sus enlaces hipermedia:
+		 * 
+		 * - self: apunta al propio recurso del producto (GET /products/{id})
+		 * 
+		 * - all-products: apunta a la coleccion completa de productos (GET /products)
+		 */
+		List<EntityModel<Product>> productosConEnlaces = products.stream()
+				.map(producto -> EntityModel.of(producto,
+						linkTo(methodOn(ProductController.class).findProductById(producto.getId())).withSelfRel(),
+						linkTo(methodOn(ProductController.class).dameProductos(null, null))
+								.withRel("all-products")))
+				.collect(Collectors.toList());
+
+		// Enlace self de la coleccion completa
+		Link selfLink = linkTo(methodOn(ProductController.class).dameProductos(page, size)).withSelfRel();
+
+		CollectionModel<EntityModel<Product>> collectionModel = CollectionModel.of(productosConEnlaces, selfLink);
+
+		// Enlaces de paginacion: prev y next, solamente si proceden
+		if (page != null && size != null && productPage.getTotalPages() > 1) {
+
+			if (page > 0) {
+				Link prevLink = linkTo(methodOn(ProductController.class).dameProductos(page - 1, size))
+						.withRel("prev");
+				collectionModel.add(prevLink);
+			}
+
+			if (page < productPage.getTotalPages() - 1) {
+				Link nextLink = linkTo(methodOn(ProductController.class).dameProductos(page + 1, size))
+						.withRel("next");
+				collectionModel.add(nextLink);
+			}
+		}
+
+		return new ResponseEntity<>(collectionModel, HttpStatus.OK);
 	}
 
 	/**
@@ -139,29 +179,43 @@ public class ProductController {
 	 */
 	@GetMapping("/{id}")
 	@PreAuthorize("hasRole('ADMIN') or hasRole('USER')")
-	public ResponseEntity<Map<String, Object>> findProductById(
+	public ResponseEntity<EntityModel<?>> findProductById(
 			@PathVariable(name = "id", required = true) int product_id) {
 
 		Map<String, Object> responseAsMap = new HashMap<>();
-		ResponseEntity<Map<String, Object>> responseEntity = null;
+		ResponseEntity<EntityModel<?>> responseEntity = null;
 
 		try {
 			Product product = productService.findById(product_id);
 			if (product != null) {
 				String successMessage = "El producto con id " + product_id + " ha sido encontrado";
 				responseAsMap.put("mensaje todo OK: ", successMessage);
-				responseAsMap.put("producto encontrado: ", product);
-				responseEntity = new ResponseEntity<Map<String, Object>>(responseAsMap, HttpStatus.OK);
+
+				/**
+				 * HATEOAS: envolver el producto encontrado en un EntityModel junto con sus
+				 * enlaces hipermedia:
+				 * 
+				 * - self: apunta al propio recurso del producto (GET /products/{id})
+				 * 
+				 * - all-products: apunta a la coleccion completa de productos (GET /products)
+				 */
+				Link selfLink = linkTo(methodOn(ProductController.class).findProductById(product_id)).withSelfRel();
+				Link allProductsLink = linkTo(methodOn(ProductController.class).dameProductos(null, null))
+						.withRel("all-products");
+
+				EntityModel<Product> productEntityModel = EntityModel.of(product, selfLink, allProductsLink);
+
+				responseEntity = new ResponseEntity<>(productEntityModel, HttpStatus.OK);
 			} else {
 				String failureMessage = "No ha sido encontrado ningun producto con id: " + product_id;
 				responseAsMap.put("Error: ", failureMessage);
-				responseEntity = new ResponseEntity<>(responseAsMap, HttpStatus.NOT_FOUND);
+				responseEntity = new ResponseEntity<>(EntityModel.of(responseAsMap), HttpStatus.NOT_FOUND);
 			}
 		} catch (DataAccessException e) {
 			String errorMessage = "Error grave al buscar el producto con id " + product_id
 					+ ", y la causa mas probable es: " + e.getMostSpecificCause().getMessage();
 			responseAsMap.put("Error grave: ", errorMessage);
-			responseEntity = new ResponseEntity<>(responseAsMap, HttpStatus.INTERNAL_SERVER_ERROR);
+			responseEntity = new ResponseEntity<>(EntityModel.of(responseAsMap), HttpStatus.INTERNAL_SERVER_ERROR);
 		}
 
 		return responseEntity;
@@ -186,12 +240,16 @@ public class ProductController {
 	@PostMapping(consumes = "multipart/form-data")
 	@Transactional
 	@PreAuthorize("hasRole('ADMIN')")
-	public ResponseEntity<Map<String, Object>> saveProduct(@Valid @RequestPart Product product, BindingResult result,
+	public ResponseEntity<EntityModel<?>> saveProduct(@Valid @RequestPart Product product, BindingResult result,
 			@RequestPart(name = "file", required = false) MultipartFile imagenDelProducto) throws IOException {
 
 		List<String> mensajesDeError = new ArrayList<>();
 		Map<String, Object> responseAsMap = new HashMap<>();
-		ResponseEntity<Map<String, Object>> responseEntity = null;
+		ResponseEntity<EntityModel<?>> responseEntity = null;
+
+		// Codigo de la imagen del producto (si se ha recibido), para construir el
+		// enlace hipermedia de descarga de la imagen
+		String codigoDeLaImagen = null;
 
 		// Primero, comprobar si hay errores en el producto recibido
 		if (result.hasErrors()) {
@@ -204,7 +262,7 @@ public class ProductController {
 			responseAsMap.put("El producto tiene los siguientes errores: ", mensajesDeError);
 			responseAsMap.put("Producto mal formado: ", product);
 
-			responseEntity = new ResponseEntity<>(responseAsMap, HttpStatus.BAD_REQUEST);
+			responseEntity = new ResponseEntity<>(EntityModel.of(responseAsMap), HttpStatus.BAD_REQUEST);
 
 			return responseEntity;
 		}
@@ -238,31 +296,47 @@ public class ProductController {
 
 			String fileCode = fileUploadUtil.saveFile(imagenDelProducto.getOriginalFilename(), imagenDelProducto);
 
-			product.setProductImage(fileCode + imagenDelProducto.getOriginalFilename());
+			product.setProductImage(fileCode + '-' + imagenDelProducto.getOriginalFilename());
 
 			/**
-			 * Como es una API REST hay que devolver informacion al que ha realizado la
-			 * request respecto a la imagen subida, para lo cual vamos a crear en un paquete
-			 * llamado com.example.models un Record, donde devolveremos la informacion de la
-			 * imagen subida
+			 * Guardar el codigo de la imagen generado, porque con el se construira el
+			 * enlace hipermedia (GET /products/fileDownLoad/{fileCode}) que permitira
+			 * descargar la imagen del producto
 			 */
-
-			FileUploadResponse fileUploadResponse = new FileUploadResponse(
-					fileCode + '-' + imagenDelProducto.getOriginalFilename(), "/products/fileDownLoad",
-					imagenDelProducto.getSize());
-
-			responseAsMap.put("informacion de la imagen del producto", fileUploadResponse);
+			codigoDeLaImagen = fileCode;
 		}
 
 		try {
 			Product productoPersistido = productService.save(product);
-			responseAsMap.put("mensaje: ", "Producto persistido exitosamente!!!");
-			responseAsMap.put("product", productoPersistido);
-			responseEntity = new ResponseEntity<Map<String, Object>>(responseAsMap, HttpStatus.CREATED);
+
+			/**
+			 * HATEOAS: envolver el producto persistido en un EntityModel junto con sus
+			 * enlaces hipermedia:
+			 * 
+			 * - self: apunta al propio recurso del producto (GET /products/{id})
+			 * 
+			 * - all-products: apunta a la coleccion completa de productos (GET /products)
+			 * 
+			 * - product-image: si el producto tiene imagen, apunta a su descarga
+			 */
+			Link selfLink = linkTo(methodOn(ProductController.class).findProductById(productoPersistido.getId()))
+					.withSelfRel();
+			Link allProductsLink = linkTo(methodOn(ProductController.class).dameProductos(null, null))
+					.withRel("all-products");
+
+			EntityModel<Product> productEntityModel = EntityModel.of(productoPersistido, selfLink, allProductsLink);
+
+			if (codigoDeLaImagen != null) {
+				Link imageLink = linkTo(methodOn(ProductController.class).downloadFile(codigoDeLaImagen))
+						.withRel("product-image");
+				productEntityModel.add(imageLink);
+			}
+
+			responseEntity = new ResponseEntity<>(productEntityModel, HttpStatus.CREATED);
 		} catch (DataAccessException e) {
 			responseAsMap.put("Error Grave", "No ha podido ser guardado el producto y la causa mas probable es: "
 					+ e.getMostSpecificCause().getMessage());
-			responseEntity = new ResponseEntity<Map<String, Object>>(responseAsMap, HttpStatus.INTERNAL_SERVER_ERROR);
+			responseEntity = new ResponseEntity<>(EntityModel.of(responseAsMap), HttpStatus.INTERNAL_SERVER_ERROR);
 		}
 
 		return responseEntity;
@@ -295,8 +369,18 @@ public class ProductController {
 		String contentType = "application/octet-stream";
 		String headerValue = "attachment; fileName=\"" + resource.getFilename() + "\"";
 
+		/**
+		 * HATEOAS: en este endpoint no tiene sentido envolver el binario de la imagen
+		 * en un EntityModel (debe viajar como fichero adjunto en el cuerpo de la
+		 * respuesta). No obstante, si se puede informar al cliente, mediante el header
+		 * HTTP Link, del enlace hacia la coleccion de productos
+		 */
+		Link allProductsLink = linkTo(methodOn(ProductController.class).dameProductos(null, null))
+				.withRel("all-products");
+
 		return ResponseEntity.ok().contentType(MediaType.parseMediaType(contentType))
-				.header(HttpHeaders.CONTENT_DISPOSITION, headerValue).body(resource);
+				.header(HttpHeaders.CONTENT_DISPOSITION, headerValue)
+				.header(HttpHeaders.LINK, allProductsLink.toString()).body(resource);
 	}
 
 	/**
@@ -374,13 +458,17 @@ public class ProductController {
 	@PutMapping(value = "/{id}", consumes = "multipart/form-data")
 	@Transactional
 	@PreAuthorize("hasRole('ADMIN')")
-	public ResponseEntity<Map<String, Object>> updateProduct(@Valid @RequestPart Product product, BindingResult result,
+	public ResponseEntity<EntityModel<?>> updateProduct(@Valid @RequestPart Product product, BindingResult result,
 			@RequestPart(name = "file", required = false) MultipartFile imagenDelProducto,
 			@PathVariable(name = "id", required = true) int product_id) throws IOException {
 
 		List<String> mensajesDeError = new ArrayList<>();
 		Map<String, Object> responseAsMap = new HashMap<>();
-		ResponseEntity<Map<String, Object>> responseEntity = null;
+		ResponseEntity<EntityModel<?>> responseEntity = null;
+
+		// Codigo de la imagen del producto (si se ha recibido), para construir el
+		// enlace hipermedia de descarga de la imagen
+		String codigoDeLaImagen = null;
 
 		// comprobar errores de validación
 		if (result.hasErrors()) {
@@ -393,7 +481,7 @@ public class ProductController {
 
 			responseAsMap.put("respuesta de error: ", mensajesDeError);
 			responseAsMap.put("producto mal formado: ", product);
-			responseEntity = new ResponseEntity<Map<String, Object>>(responseAsMap, HttpStatus.BAD_REQUEST);
+			responseEntity = new ResponseEntity<>(EntityModel.of(responseAsMap), HttpStatus.BAD_REQUEST);
 
 			return responseEntity;
 		}
@@ -406,7 +494,7 @@ public class ProductController {
 		if (productoParaActualizar == null) {
 
 			responseAsMap.put("mensaje de error: ", "producto con id: " + product_id + " no encontrado.");
-			return new ResponseEntity<Map<String, Object>>(responseAsMap, HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(EntityModel.of(responseAsMap), HttpStatus.NOT_FOUND);
 		}
 
 		if (imagenDelProducto != null && !imagenDelProducto.isEmpty()) {
@@ -432,23 +520,43 @@ public class ProductController {
 					imagenDelProducto);
 
 			product.setProductImage(fileCode + '-' + imagenDelProducto.getOriginalFilename());
-			/**
-			 * en el paquete models crearemos un record donde devolveremos al frontend la
-			 * info de la imagen
-			 */
-			FileUploadResponse fileUploadResponse = new FileUploadResponse(
-					fileCode + '-' + imagenDelProducto.getOriginalFilename(), "/products/fileDownload",
-					imagenDelProducto.getSize());
 
-			responseAsMap.put("información de la imagen del producto", fileUploadResponse);
+			/**
+			 * Guardar el codigo de la imagen generado, porque con el se construira el
+			 * enlace hipermedia (GET /products/fileDownLoad/{fileCode}) que permitira
+			 * descargar la imagen del producto
+			 */
+			codigoDeLaImagen = fileCode;
 		}
 
 		try {
 			product.setId(product_id);
 			Product productoAGuardar = productService.save(product);
-			responseAsMap.put("mensaje: ", "Producto actualizado exitósamente!");
-			responseAsMap.put("producto actualizado: ", productoAGuardar);
-			responseEntity = new ResponseEntity<Map<String, Object>>(responseAsMap, HttpStatus.OK);
+
+			/**
+			 * HATEOAS: envolver el producto actualizado en un EntityModel junto con sus
+			 * enlaces hipermedia:
+			 * 
+			 * - self: apunta al propio recurso del producto (GET /products/{id})
+			 * 
+			 * - all-products: apunta a la coleccion completa de productos (GET /products)
+			 * 
+			 * - product-image: si el producto tiene imagen, apunta a su descarga
+			 */
+			Link selfLink = linkTo(methodOn(ProductController.class).findProductById(productoAGuardar.getId()))
+					.withSelfRel();
+			Link allProductsLink = linkTo(methodOn(ProductController.class).dameProductos(null, null))
+					.withRel("all-products");
+
+			EntityModel<Product> productEntityModel = EntityModel.of(productoAGuardar, selfLink, allProductsLink);
+
+			if (codigoDeLaImagen != null) {
+				Link imageLink = linkTo(methodOn(ProductController.class).downloadFile(codigoDeLaImagen))
+						.withRel("product-image");
+				productEntityModel.add(imageLink);
+			}
+
+			responseEntity = new ResponseEntity<>(productEntityModel, HttpStatus.OK);
 
 		} catch (DataAccessException e) {
 
@@ -457,7 +565,7 @@ public class ProductController {
 			// e.getStackTrace();
 			responseAsMap.put("Error grave: ", errorMessage);
 
-			responseEntity = new ResponseEntity<Map<String, Object>>(responseAsMap, HttpStatus.INTERNAL_SERVER_ERROR);
+			responseEntity = new ResponseEntity<>(EntityModel.of(responseAsMap), HttpStatus.INTERNAL_SERVER_ERROR);
 		}
 
 		return responseEntity;
@@ -470,9 +578,9 @@ public class ProductController {
     @DeleteMapping("/{id}")
     @Transactional
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Map<String, Object>> deleteProducto(@PathVariable Integer id) {
+    public ResponseEntity<EntityModel<?>> deleteProducto(@PathVariable Integer id) {
 
-        ResponseEntity<Map<String, Object>> responseEntity = null;
+        ResponseEntity<EntityModel<?>> responseEntity = null;
         var responseAsMap = new HashMap<String, Object>();
 
         try {
@@ -483,7 +591,7 @@ public class ProductController {
             if (productToDelete == null) {
 
             responseAsMap.put("mensaje de error: ", "producto con id: " + id + " no encontrado.");
-            return new ResponseEntity<Map<String, Object>>(responseAsMap, HttpStatus.NOT_FOUND);
+            return new ResponseEntity<>(EntityModel.of(responseAsMap), HttpStatus.NOT_FOUND);
         }
 
             if (productToDelete.getProductImage() != null) {
@@ -493,12 +601,19 @@ public class ProductController {
             productService.delete(productService.findById(id));
             String successMessage = "El producto con id " + id + ", ha sido eliminado";
             responseAsMap.put("mensaje", successMessage);
-            responseEntity = new ResponseEntity<Map<String, Object>>(responseAsMap, HttpStatus.OK);
+
+            /**
+             * HATEOAS: envolver la respuesta en un EntityModel con un enlace hacia la
+             * coleccion de productos
+             */
+            Link allProductsLink = linkTo(methodOn(ProductController.class).dameProductos(null, null))
+                    .withRel("all-products");
+            responseEntity = new ResponseEntity<>(EntityModel.of(responseAsMap, allProductsLink), HttpStatus.OK);
         } catch (DataAccessException e) {
             String errorMessage = "No ha podido ser eliminado el producto cuyo id es: " + id
                     + ", siendo la causa mas probable: " + e.getMostSpecificCause().getMessage();
             responseAsMap.put("mensaje", errorMessage);
-            responseEntity = new ResponseEntity<Map<String, Object>>(responseAsMap,
+            responseEntity = new ResponseEntity<>(EntityModel.of(responseAsMap),
                     HttpStatus.INTERNAL_SERVER_ERROR);
         }
 

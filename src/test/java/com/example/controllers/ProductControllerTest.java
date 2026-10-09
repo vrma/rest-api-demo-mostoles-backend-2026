@@ -6,6 +6,7 @@ import static org.mockito.Mockito.doNothing;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 
@@ -146,7 +147,8 @@ class ProductControllerTest {
 				.productImage(null)
 				.presentation(presentation1)
 				.build();
-		
+		product1.setId(1);
+
 			
 		product2 = Product.builder()
 				.name("Frigorifico")
@@ -156,6 +158,7 @@ class ProductControllerTest {
 				.productImage(null)
 				.presentation(presentation2)
 				.build();
+		product2.setId(2);
 		
 		products.add(product1);
 		products.add(product2);
@@ -180,8 +183,12 @@ class ProductControllerTest {
 		// then
 
 		response.andExpect(status().isOk()).andDo(print())
-				.andExpect(jsonPath("$.products.size()",
-						is(products.size())));
+				.andExpect(jsonPath("$._embedded.productList.size()",
+						is(products.size())))
+				.andExpect(jsonPath("$._embedded.productList[0].name",
+						is(product1.getName())))
+				.andExpect(jsonPath("$._links.self.href",
+						containsString("/products")));
 
 	}
 
@@ -215,8 +222,10 @@ class ProductControllerTest {
 					.header("Authorization", this.token))			    
 				    	.andDo(print())
 				    	.andExpect(status().isCreated())
-				    	.andExpect(jsonPath("$.product.name",
-		  			is(product1.getName())));
+				    	.andExpect(jsonPath("$.name",
+		  			is(product1.getName())))
+				    	.andExpect(jsonPath("$._links.self.href",
+		  			containsString("/products/1")));
 		  	
 		  
 		} catch (Exception e) {
@@ -245,8 +254,12 @@ class ProductControllerTest {
 				.header("Authorization", this.token))
 				.andDo(print())
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$['producto encontrado: '].name",
-						is(product1.getName())));
+				.andExpect(jsonPath("$.name",
+						is(product1.getName())))
+				.andExpect(jsonPath("$._links.self.href",
+						containsString("/products/1")))
+				.andExpect(jsonPath("$._links['all-products'].href",
+						containsString("/products")));
 	}
 
 	@Test
@@ -295,10 +308,12 @@ class ProductControllerTest {
         //then
         response.andDo(print())
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$['producto actualizado: '].name",
+            .andExpect(jsonPath("$.name",
             		is(product1.getName())))
-            .andExpect(jsonPath("$['producto actualizado: '].description",
-            		is(product1.getDescription())));
+            .andExpect(jsonPath("$.description",
+            		is(product1.getDescription())))
+            .andExpect(jsonPath("$._links.self.href",
+            		containsString("/products/1")));
         
 
     }
